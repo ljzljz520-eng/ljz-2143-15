@@ -15,6 +15,7 @@ RUN apt-get update \
        websockify \
        x11-utils \
        ca-certificates \
+       python3 \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
@@ -22,6 +23,6 @@ WORKDIR /app
 COPY . /app
 RUN chmod +x /app/docker/entrypoint.sh && make
 
-EXPOSE 6080
+EXPOSE 6080 8000
 
 CMD ["/app/docker/entrypoint.sh"]

@@ -1,0 +1,242 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>状态同步管理端</title>
+<style>
+  :root { --fg:#1c2733; --muted:#5b6b7b; --line:#d7dee6; --accent:#0b6bcb; --warn:#b23b3b; }
+  * { box-sizing: border-box; }
+  body { font-family: "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
+         margin: 0; color: var(--fg); background: #f4f6f9; }
+  header { background: #12263a; color: #fff; padding: 12px 20px; }
+  header h1 { font-size: 17px; margin: 0; }
+  header .meta { font-size: 12px; color: #9fb3c8; margin-top: 4px; }
+  nav { display: flex; gap: 4px; padding: 8px 20px 0; background: #fff;
+        border-bottom: 1px solid var(--line); }
+  nav button { border: 0; background: none; padding: 10px 14px; cursor: pointer;
+               font-size: 14px; color: var(--muted); border-bottom: 2px solid transparent; }
+  nav button.active { color: var(--accent); border-bottom-color: var(--accent); font-weight: 600; }
+  main { padding: 18px 20px; }
+  .panel { display: none; }
+  .panel.active { display: block; }
+  table { border-collapse: collapse; width: 100%; background: #fff; font-size: 13px; }
+  th, td { border: 1px solid var(--line); padding: 6px 9px; text-align: left;
+           vertical-align: top; }
+  th { background: #eef2f6; white-space: nowrap; }
+  td pre { margin: 0; white-space: pre-wrap; word-break: break-all; font-size: 12px; }
+  .card { background: #fff; border: 1px solid var(--line); border-radius: 6px;
+          padding: 14px; margin-bottom: 14px; }
+  .row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin-bottom: 10px; }
+  input, select, textarea { font: inherit; padding: 6px 8px; border: 1px solid var(--line);
+                            border-radius: 4px; }
+  textarea { width: 100%; min-height: 180px; font-family: ui-monospace, monospace; font-size: 13px; }
+  button.action { background: var(--accent); color: #fff; border: 0; border-radius: 4px;
+                  padding: 7px 16px; cursor: pointer; }
+  .tag { display: inline-block; padding: 1px 7px; border-radius: 9px; font-size: 11px;
+         background: #e3ecf5; color: #2c5d8f; }
+  .tag.device { background: #e7f3e7; color: #2f6b2f; }
+  .tag.user { background: #e3ecf5; }
+  .tag.admin { background: #f6ecd9; color: #8a6d1d; }
+  .tag.builtin { background: #eee; color: #777; }
+  .tag.fallback { background: #fbe3e3; color: var(--warn); }
+  .winner { font-weight: 700; }
+  .muted { color: var(--muted); font-size: 12px; }
+  .err { color: var(--warn); }
+  #toast { position: fixed; right: 18px; bottom: 18px; background: #12263a; color: #fff;
+           padding: 10px 16px; border-radius: 6px; display: none; max-width: 50%; }
+</style>
+</head>
+<body>
+<header>
+  <h1>窗口状态同步 · 管理端</h1>
+  <div class="meta" id="serverMeta">加载中…</div>
+</header>
+<nav>
+  <button data-tab="defaults" class="active">远程默认配置</button>
+  <button data-tab="effective">生效配置 / 最终来源</button>
+  <button data-tab="conflicts">冲突记录</button>
+  <button data-tab="devices">设备</button>
+  <button data-tab="diagnostics">诊断副本</button>
+</nav>
+<main>
+  <section id="tab-defaults" class="panel active">
+    <div class="card">
+      <p class="muted">编辑 admin 层远程默认配置（JSON：字段路径 → 值）。仅 prefs.* 可编辑；
+         machine.* 为设备私有坐标，不在此下发。保存走字段级合并，与设备并发写冲突会记录在案。</p>
+      <textarea id="defaultsEditor" spellcheck="false"></textarea>
+      <div class="row" style="margin-top:10px">
+        <button class="action" id="saveDefaults">保存默认配置</button>
+        <span id="defaultsMsg" class="muted"></span>
+      </div>
+    </div>
+    <div class="card">
+      <h3>当前 admin 层字段版本</h3>
+      <table id="defaultsTable"><thead><tr>
+        <th>字段</th><th>值</th><th>版本</th><th>来源</th><th>更新时间</th>
+      </tr></thead><tbody></tbody></table>
+    </div>
+  </section>
+
+  <section id="tab-effective" class="panel">
+    <div class="card">
+      <div class="row">
+        <label>设备 <input id="effDevice" value="dev-1"></label>
+        <label>用户 <input id="effUser" value="alice"></label>
+        <button class="action" id="loadEffective">查询</button>
+      </div>
+      <p class="muted">每个字段的生效值与最终来源（device / user / admin / builtin 分层裁决结果）。</p>
+      <table id="effectiveTable"><thead><tr>
+        <th>字段</th><th>生效值</th><th>最终来源层</th><th>写入者</th><th>版本</th><th>更新时间</th>
+      </tr></thead><tbody></tbody></table>
+    </div>
+  </section>
+
+  <section id="tab-conflicts" class="panel">
+    <div class="card">
+      <p class="muted">同层并发写的原始冲突：base / 传入值 / 当前值、双方来源与裁决胜方。</p>
+      <table id="conflictsTable"><thead><tr>
+        <th>时间</th><th>字段</th><th>层/作用域</th><th>base</th>
+        <th>传入值（来源）</th><th>当前值（来源）</th><th>胜方</th><th>原因</th>
+      </tr></thead><tbody></tbody></table>
+    </div>
+  </section>
+
+  <section id="tab-devices" class="panel">
+    <div class="card">
+      <table id="devicesTable"><thead><tr>
+        <th>设备</th><th>用户</th><th>最近在线</th><th>已同步 seq</th><th>客户端 schema</th>
+      </tr></thead><tbody></tbody></table>
+    </div>
+  </section>
+
+  <section id="tab-diagnostics" class="panel">
+    <div class="card">
+      <p class="muted">客户端损坏配置的诊断副本（隔离保留，不参与同步）。</p>
+      <table id="diagnosticsTable"><thead><tr>
+        <th>ID</th><th>时间</th><th>设备</th><th>类型</th><th>文件</th><th>大小</th><th></th>
+      </tr></thead><tbody></tbody></table>
+    </div>
+    <div class="card"><h3>内容</h3><pre id="diagContent" class="muted">选择一条记录查看</pre></div>
+  </section>
+</main>
+<div id="toast"></div>
+<script>
+const $ = (s) => document.querySelector(s);
+const api = async (path, opts) => {
+  const r = await fetch(path, opts);
+  const body = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(body.error || r.statusText);
+  return body;
+};
+const toast = (msg, isErr) => {
+  const t = $("#toast");
+  t.textContent = msg;
+  t.style.background = isErr ? "#b23b3b" : "#12263a";
+  t.style.display = "block";
+  setTimeout(() => t.style.display = "none", 3200);
+};
+const esc = (s) => String(s ?? "").replace(/[&<>]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;"}[c]));
+
+document.querySelectorAll("nav button").forEach(btn => btn.addEventListener("click", () => {
+  document.querySelectorAll("nav button").forEach(b => b.classList.remove("active"));
+  document.querySelectorAll(".panel").forEach(p => p.classList.remove("active"));
+  btn.classList.add("active");
+  $("#tab-" + btn.dataset.tab).classList.add("active");
+  loadTab(btn.dataset.tab);
+}));
+
+async function loadMeta() {
+  const h = await api("/api/health");
+  $("#serverMeta").textContent =
+    `epoch=${h.epoch.slice(0,8)}… · server_seq=${h.server_seq} · schema=v${h.schema_version}`;
+}
+
+async function loadDefaults() {
+  const data = await api("/api/admin/defaults");
+  const obj = {};
+  for (const f of data.fields) obj[f.field] = JSON.parse(f.value);
+  $("#defaultsEditor").value = JSON.stringify(obj, null, 2);
+  $("#defaultsTable tbody").innerHTML = data.fields.map(f =>
+    `<tr><td>${esc(f.field)}</td><td><pre>${esc(f.value)}</pre></td><td>${f.version}</td>
+     <td><span class="tag admin">${esc(f.source)}</span></td><td>${esc(f.updated_at)}</td></tr>`
+  ).join("") || `<tr><td colspan="5" class="muted">（尚未设置，设备将使用内置兜底值）</td></tr>`;
+}
+
+$("#saveDefaults").addEventListener("click", async () => {
+  let obj;
+  try { obj = JSON.parse($("#defaultsEditor").value); }
+  catch (e) { toast("JSON 解析失败: " + e.message, true); return; }
+  const cur = await api("/api/admin/defaults");
+  const versions = Object.fromEntries(cur.fields.map(f => [f.field, f.version]));
+  const changes = Object.entries(obj).map(([field, value]) =>
+    ({ field, value, base_version: versions[field] || 0 }));
+  try {
+    const r = await api("/api/admin/defaults", {
+      method: "POST", headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({ admin: "web-admin", changes }),
+    });
+    const bad = r.results.filter(x => !["accepted","conflict_won"].includes(x.status));
+    $("#defaultsMsg").textContent = bad.length
+      ? "部分字段未接受: " + bad.map(x => x.field + "=" + x.status).join(", ")
+      : `已保存 ${r.results.length} 个字段（server_seq=${r.server_seq}）`;
+    toast("默认配置已保存");
+    loadDefaults(); loadMeta();
+  } catch (e) { toast(e.message, true); }
+});
+
+async function loadEffective() {
+  const d = encodeURIComponent($("#effDevice").value);
+  const u = encodeURIComponent($("#effUser").value);
+  const data = await api(`/api/admin/effective?device_id=${d}&user=${u}`);
+  $("#effectiveTable tbody").innerHTML = Object.entries(data.fields).map(([f, v]) =>
+    `<tr><td>${esc(f)}</td><td><pre>${esc(v.value)}</pre></td>
+     <td><span class="tag ${esc(v.layer)}">${esc(v.layer)}</span></td>
+     <td>${esc(v.source)}</td><td>${v.version}</td><td>${esc(v.updated_at || "")}</td></tr>`
+  ).join("");
+}
+$("#loadEffective").addEventListener("click", loadEffective);
+
+async function loadConflicts() {
+  const data = await api("/api/admin/conflicts");
+  $("#conflictsTable tbody").innerHTML = data.conflicts.map(c =>
+    `<tr><td>${esc(c.ts)}</td><td>${esc(c.field)}</td>
+     <td>${esc(c.layer)}/${esc(c.scope)}</td>
+     <td><pre>${esc(c.base_value ?? "—")}</pre></td>
+     <td><pre>${esc(c.incoming_value)}</pre><span class="tag">${esc(c.incoming_source)}</span></td>
+     <td><pre>${esc(c.current_value)}</pre><span class="tag">${esc(c.current_source)}</span></td>
+     <td class="winner">${esc(c.winner)}</td><td>${esc(c.reason)}</td></tr>`
+  ).join("") || `<tr><td colspan="8" class="muted">（无冲突记录）</td></tr>`;
+}
+
+async function loadDevices() {
+  const data = await api("/api/admin/devices");
+  $("#devicesTable tbody").innerHTML = data.devices.map(d =>
+    `<tr><td>${esc(d.device_id)}</td><td>${esc(d.user)}</td><td>${esc(d.last_seen)}</td>
+     <td>${d.last_seq}</td><td>v${d.schema_version}</td></tr>`
+  ).join("") || `<tr><td colspan="5" class="muted">（暂无设备）</td></tr>`;
+}
+
+async function loadDiagnostics() {
+  const data = await api("/api/admin/diagnostics");
+  $("#diagnosticsTable tbody").innerHTML = data.diagnostics.map(d =>
+    `<tr><td>${d.id}</td><td>${esc(d.ts)}</td><td>${esc(d.device_id)}</td>
+     <td><span class="tag fallback">${esc(d.kind)}</span></td>
+     <td>${esc(d.filename)}</td><td>${d.size}</td>
+     <td><button data-diag="${d.id}">查看</button></td></tr>`
+  ).join("") || `<tr><td colspan="7" class="muted">（无诊断副本）</td></tr>`;
+  document.querySelectorAll("[data-diag]").forEach(b => b.addEventListener("click", async () => {
+    const d = await api("/api/admin/diagnostics/" + b.dataset.diag);
+    $("#diagContent").textContent = d.content;
+  }));
+}
+
+function loadTab(tab) {
+  ({ defaults: loadDefaults, effective: loadEffective, conflicts: loadConflicts,
+     devices: loadDevices, diagnostics: loadDiagnostics }[tab] || (() => {}))();
+}
+
+loadMeta();
+loadDefaults();
+</script>
+</body>
+</html>

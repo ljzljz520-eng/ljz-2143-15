@@ -1,9 +1,34 @@
 services:
+  sync-server:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile
+    container_name: state-sync-server
+    command: python3 -m server.server --db /data/state_sync.db --host 0.0.0.0 --port 8000
+    volumes:
+      - sync-data:/data
+    ports:
+      - "8000:8000"
+    restart: "no"
+
   visual-window-app:
     build:
       context: .
       dockerfile: docker/Dockerfile
     container_name: visual-window-app
+    depends_on:
+      - sync-server
+    environment:
+      APP_SERVER: http://sync-server:8000
+      APP_STATE_DIR: /state
+      APP_DEVICE_ID: docker-desktop-1
+      APP_USER: demo
+    volumes:
+      - app-state:/state
     ports:
       - "6080:6080"
     restart: "no"
+
+volumes:
+  sync-data:
+  app-state:

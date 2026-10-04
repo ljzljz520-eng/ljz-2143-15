@@ -14,8 +14,8 @@ bool renderer_load_background(
         return false;
     }
 
-    scene->background = IMG_LoadTexture(renderer, image_path);
-    if (scene->background == NULL) {
+    SDL_Texture *texture = IMG_LoadTexture(renderer, image_path);
+    if (texture == NULL) {
         fprintf(
             stderr,
             "IMG_LoadTexture failed for %s: %s\n",
@@ -25,6 +25,11 @@ bool renderer_load_background(
         return false;
     }
 
+    // 支持后台换图后热重载：先释放旧纹理再替换。
+    if (scene->background != NULL) {
+        SDL_DestroyTexture(scene->background);
+    }
+    scene->background = texture;
     return true;
 }
 

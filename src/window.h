@@ -11,7 +11,10 @@ typedef struct {
     int height;
 } AppWindow;
 
-bool window_init(AppWindow *app, const char *title, int width, int height);
+/* x/y 传负数表示居中（SDL_WINDOWPOS_CENTERED）。 */
+bool window_init(AppWindow *app, const char *title, int x, int y, int width, int height);
+void window_get_geometry(const AppWindow *app, int *x, int *y, int *width, int *height);
+void window_set_geometry(AppWindow *app, int x, int y, int width, int height);
 void window_destroy(AppWindow *app);
 
 #endif
