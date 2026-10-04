@@ -6,6 +6,7 @@
 
 typedef struct {
     SDL_Texture *background;
+    bool background_failed;
 } SceneRenderer;
 
 bool renderer_load_background(
@@ -23,4 +24,4 @@ void renderer_draw_background(
 
 void renderer_destroy(SceneRenderer *scene);
 
-#endif
+#endif /* RENDERER_H */

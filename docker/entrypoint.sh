@@ -8,7 +8,7 @@ NOVNC_PORT="6080"
 
 cleanup() {
   local code=$?
-  for pid in "${APP_PID:-}" "${NOVNC_PID:-}" "${VNC_PID:-}" "${WM_PID:-}" "${XVFB_PID:-}"; do
+  for pid in "${APP_PID:-}" "${AGENT_SYNC_PID:-}" "${SERVER_PID:-}" "${NOVNC_PID:-}" "${VNC_PID:-}" "${WM_PID:-}" "${XVFB_PID:-}"; do
     if [[ -n "${pid}" ]] && kill -0 "${pid}" 2>/dev/null; then
       kill "${pid}" 2>/dev/null || true
       wait "${pid}" 2>/dev/null || true
@@ -63,6 +63,26 @@ else
   websockify --web=/usr/share/novnc/ "${NOVNC_PORT}" "localhost:${VNC_PORT}" >/tmp/novnc.log 2>&1 &
 fi
 NOVNC_PID=$!
+
+# Optional state-sync backend + terminal agent for the local container.
+# Pure local recovery works regardless; set SYNC_SERVER=1 to enable.
+if [[ "${SYNC_SERVER:-0}" == "1" ]]; then
+  export PYTHONPATH="/app/sync:${PYTHONPATH:-}"
+  mkdir -p /app/data
+  python3 /app/sync/synckit/server/app.py --db /app/data/state-sync.db \
+    --host 127.0.0.1 --port 8080 >/tmp/sync-server.log 2>&1 &
+  SERVER_PID=$!
+  export VW_SYNC_URL="http://127.0.0.1:8080"
+  for _ in $(seq 1 30); do
+    if curl -sf http://127.0.0.1:8080/api/health >/dev/null 2>&1 \
+       || wget -qO- http://127.0.0.1:8080/api/health >/dev/null 2>&1; then
+      break
+    fi
+    sleep 0.2
+  done
+  python3 /app/sync/agent/agent.py >/tmp/sync-agent.log 2>&1 &
+  AGENT_SYNC_PID=$!
+fi
 
 ./visual-window-app &
 APP_PID=$!

@@ -15,12 +15,14 @@ RUN apt-get update \
        websockify \
        x11-utils \
        ca-certificates \
+       python3 \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 
 COPY . /app
-RUN chmod +x /app/docker/entrypoint.sh && make
+RUN chmod +x /app/docker/entrypoint.sh /app/docker/start-services.sh && make
+ENV PYTHONPATH=/app/sync
 
 EXPOSE 6080
 

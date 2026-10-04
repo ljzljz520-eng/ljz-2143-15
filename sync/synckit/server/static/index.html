@@ -1,0 +1,283 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>窗口/背景状态同步 · 管理端</title>
+<style>
+  :root { --bg:#0f1623; --panel:#172033; --line:#26304a; --fg:#e7edf7;
+          --muted:#93a0b8; --accent:#4f8cff; --warn:#ffb020; --err:#ff5d5d;
+          --ok:#33c27f; }
+  * { box-sizing:border-box; }
+  body { margin:0; font:14px/1.5 -apple-system,Segoe UI,Roboto,Helvetica,Arial,
+          "PingFang SC","Microsoft YaHei",sans-serif;
+         background:var(--bg); color:var(--fg); }
+  header { padding:14px 22px; border-bottom:1px solid var(--line);
+           display:flex; gap:18px; align-items:center; }
+  header h1 { font-size:16px; margin:0; font-weight:600; }
+  nav { display:flex; gap:4px; }
+  nav button { background:transparent; color:var(--muted); border:0;
+    padding:8px 14px; border-radius:8px; cursor:pointer; font-size:14px; }
+  nav button.active { background:var(--panel); color:var(--fg); }
+  main { padding:22px; max-width:1100px; }
+  .card { background:var(--panel); border:1px solid var(--line);
+          border-radius:12px; padding:18px; margin-bottom:18px; }
+  h2 { font-size:15px; margin:0 0 12px; }
+  table { width:100%; border-collapse:collapse; font-size:13px; }
+  th,td { text-align:left; padding:8px 10px; border-bottom:1px solid var(--line);
+          vertical-align:top; }
+  th { color:var(--muted); font-weight:500; }
+  code,.mono { font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+              font-size:12.5px; }
+  .pill { display:inline-block; padding:1px 8px; border-radius:99px;
+          font-size:11.5px; }
+  .pill.merge { background:#1c3055; color:#9dc1ff; }
+  .pill.overwrite { background:#3a2340; color:#e0a6ff; }
+  .pill.lww-client { background:#13351f; color:#7be0ab; }
+  .pill.lww-server { background:#3a2c12; color:#ffd27a; }
+  .pill.enforced-admin-wins { background:#3a1414; color:#ff9d9d; }
+  .pill.admin-overwrite { background:#3a2340; color:#e0a6ff; }
+  textarea { width:100%; min-height:220px; background:#0b111d; color:var(--fg);
+    border:1px solid var(--line); border-radius:8px; padding:12px;
+    font-family:ui-monospace,monospace; font-size:12.5px; }
+  input[type=text] { background:#0b111d; color:var(--fg);
+    border:1px solid var(--line); border-radius:6px; padding:7px 10px; }
+  button.primary { background:var(--accent); color:white; border:0;
+    padding:9px 16px; border-radius:8px; cursor:pointer; font-weight:600; }
+  button.ghost { background:transparent; border:1px solid var(--line);
+    color:var(--fg); padding:7px 12px; border-radius:8px; cursor:pointer; }
+  .row { display:flex; gap:10px; align-items:center; flex-wrap:wrap; }
+  .muted { color:var(--muted); }
+  .grid3 { display:grid; grid-template-columns:1fr 1fr 1fr; gap:10px; }
+  pre { background:#0b111d; border:1px solid var(--line); border-radius:8px;
+        padding:10px; overflow:auto; margin:4px 0; }
+  .hidden { display:none; }
+  #toast { position:fixed; right:18px; bottom:18px; background:var(--panel);
+    border:1px solid var(--line); padding:10px 14px; border-radius:10px;
+    opacity:0; transition:opacity .2s; }
+  .danger { color:var(--err); }
+  label.chk { display:flex; gap:6px; align-items:center; color:var(--muted); }
+</style>
+</head>
+<body>
+<header>
+  <h1>窗口 / 背景状态同步管理端</h1>
+  <nav id="tabs">
+    <button data-tab="defaults" class="active">远程默认配置</button>
+    <button data-tab="versions">配置版本 / 回退</button>
+    <button data-tab="devices">设备</button>
+    <button data-tab="conflicts">冲突与最终来源</button>
+    <button data-tab="diagnostics">诊断副本</button>
+  </nav>
+</header>
+<main>
+  <section id="tab-defaults">
+    <div class="card">
+      <h2>编辑组默认配置（远程默认值，<b>不含</b>任何显示器坐标）</h2>
+      <p class="muted">字段级合并（默认）只影响叶子；“整份覆盖”仅在显式选择时使用，且只作用于 profile 作用域。被 <code>enforced</code> 勾选的叶子由管理员独占写入，客户端改动会被拒绝并记录冲突。</p>
+      <div class="row" style="margin-bottom:10px">
+        <label class="muted">组</label>
+        <input id="group" type="text" value="default" />
+        <button class="ghost" id="load-defaults">载入当前版本</button>
+        <span id="defaults-meta" class="muted"></span>
+      </div>
+      <textarea id="defaults-doc" spellcheck="false"></textarea>
+      <div class="row" style="margin-top:10px">
+        <label class="muted">enforced 叶子（每行一个点分路径）</label>
+      </div>
+      <textarea id="defaults-enforced" spellcheck="false"
+        style="min-height:70px"></textarea>
+      <div class="row" style="margin-top:12px">
+        <input id="note" type="text" placeholder="发布说明" />
+        <label class="chk"><input type="radio" name="mode" value="merge" checked />字段级合并发布</label>
+        <label class="chk"><input type="radio" name="mode" value="overwrite" />整份覆盖发布</label>
+        <button class="primary" id="publish">发布新版本</button>
+      </div>
+      <p class="muted" id="publish-hint"></p>
+    </div>
+  </section>
+
+  <section id="tab-versions" class="hidden">
+    <div class="card">
+      <h2>配置版本链（版本单调递增；回退=用旧内容创建新版本）</h2>
+      <table id="versions-table">
+        <thead><tr><th>版本</th><th>模式</th><th>说明</th><th>回退自</th><th>enforced</th><th>时间</th><th></th></tr></thead>
+        <tbody></tbody>
+      </table>
+    </div>
+  </section>
+
+  <section id="tab-devices" class="hidden">
+    <div class="card">
+      <h2>设备（显示器指纹仅用于诊断，坐标永不同步）</h2>
+      <table id="devices-table">
+        <thead><tr><th>设备</th><th>用户</th><th>组</th><th>profile基线</th>
+        <th>session基线</th><th>屏幕拓扑指纹</th><th>schema</th><th>损坏计数</th><th>最近在线</th></tr></thead>
+        <tbody></tbody>
+      </table>
+    </div>
+  </section>
+
+  <section id="tab-conflicts" class="hidden">
+    <div class="card">
+      <h2>原始冲突三方值与最终来源</h2>
+      <p class="muted">每条记录同时保留 base / client / server 的原始叶子值，以及最终决议（LWW / 强制 / 整份覆盖）与胜出者。</p>
+      <table id="conflicts-table">
+        <thead><tr><th>时间</th><th>用户/设备</th><th>路径</th>
+        <th>base</th><th>client</th><th>server</th><th>决议</th><th>胜出者</th><th>最终值</th><th>profile版本</th></tr></thead>
+        <tbody></tbody>
+      </table>
+    </div>
+  </section>
+
+  <section id="tab-diagnostics" class="hidden">
+    <div class="card">
+      <h2>损坏配置诊断副本</h2>
+      <p class="muted">终端损坏的 state/日志保留本地诊断副本并上报告警；自动回退默认值只在本机使用，不会被同步覆盖到全组设备。</p>
+      <table id="diag-table">
+        <thead><tr><th>时间</th><th>设备</th><th>用户</th><th>类型</th><th>负载</th></tr></thead>
+        <tbody></tbody>
+      </table>
+    </div>
+  </section>
+</main>
+<div id="toast"></div>
+
+<script>
+const $ = (s, el=document) => el.querySelector(s);
+const api = async (path, opts={}) => {
+  const res = await fetch(path, {headers:{'Content-Type':'application/json'}, ...opts});
+  if (!res.ok) throw new Error((await res.text()));
+  return res.json();
+};
+const esc = s => String(s ?? '').replace(/[&<>"]/g, c =>
+  ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const groupId = () => $('#group').value.trim() || 'default';
+const toast = msg => { const t=$('#toast'); t.textContent=msg; t.style.opacity=1;
+  setTimeout(()=>t.style.opacity=0, 2600); };
+
+document.querySelectorAll('#tabs button').forEach(b => b.onclick = () => {
+  document.querySelectorAll('#tabs button').forEach(x=>x.classList.remove('active'));
+  b.classList.add('active');
+  document.querySelectorAll('main > section').forEach(s=>s.classList.add('hidden'));
+  $('#tab-' + b.dataset.tab).classList.remove('hidden');
+  refresh();
+});
+
+async function loadDefaults() {
+  try {
+    const d = await api(`/api/admin/groups/${encodeURIComponent(groupId())}/defaults`);
+    $('#defaults-doc').value = JSON.stringify(d.doc, null, 2);
+    $('#defaults-enforced').value = (d.enforced||[]).join('\n');
+    $('#defaults-meta').textContent =
+      `当前 v${d.version} · 模式 ${d.mode} · ${d.note||''}` +
+      (d.rolled_back_from ? ` · 回退自 v${d.rolled_back_from}` : '');
+  } catch (e) {
+    $('#defaults-doc').value = JSON.stringify({
+      "theme.background.uri":"assets/background.png",
+      "theme.background.mode":"fill",
+      "theme.accent":"#2b6cb0","theme.dark":false
+    }, null, 2);
+    $('#defaults-meta').textContent = '尚无该组版本（将在首次发布时创建）';
+  }
+}
+$('#load-defaults').onclick = loadDefaults;
+
+$('#publish').onclick = async () => {
+  let doc;
+  try { doc = JSON.parse($('#defaults-doc').value); }
+  catch (e) { toast('JSON 解析失败：' + e.message); return; }
+  const enforced = $('#defaults-enforced').value.split('\n')
+    .map(s=>s.trim()).filter(Boolean);
+  const mode = document.querySelector('input[name=mode]:checked').value;
+  const hint = $('#publish-hint');
+  if (mode === 'overwrite') {
+    hint.innerHTML = '<span class="danger">整份覆盖：未在 enforced 中、但用户改过的叶子会被整份替换，逐叶子写入审计。device 作用域不受影响。</span>';
+  } else { hint.textContent = '字段级合并：逐叶子三向合并，用户离线改动与本次默认改动按叶子共存。'; }
+  try {
+    const r = await api(`/api/admin/groups/${encodeURIComponent(groupId())}/publish`, {
+      method:'POST',
+      body: JSON.stringify({doc, enforced, mode, by:'web-admin',
+                            note: $('#note').value})
+    });
+    toast(`已发布 v${r.version}`);
+    await loadDefaults(); await loadVersions();
+  } catch (e) { toast('发布失败：' + e.message); }
+};
+
+async function loadVersions() {
+  const rows = await api(`/api/admin/groups/${encodeURIComponent(groupId())}/versions`).catch(()=>[]);
+  $('#versions-table tbody').innerHTML = rows.map(r => `
+    <tr>
+      <td><b>v${r.version}</b></td>
+      <td><span class="pill ${r.mode}">${r.mode}</span></td>
+      <td>${esc(r.note)}</td>
+      <td>${r.rolled_back_from ? `回退自 v${r.rolled_back_from}` : ''}</td>
+      <td class="muted">${(r.enforced_json||[]).map(esc).join('<br>')}</td>
+      <td class="mono muted">${new Date(r.created_at).toLocaleString()}</td>
+      <td>${r.version < rows[rows.length-1].version
+        ? `<button class="ghost" onclick="rollback(${r.version})">回退到此版本</button>` : ''}
+      </td>
+    </tr>`).join('');
+}
+window.rollback = async v => {
+  if (!confirm(`确认用 v${v} 的内容创建一个新版本？版本号继续递增，不会改写历史。`)) return;
+  const r = await api(`/api/admin/groups/${encodeURIComponent(groupId())}/rollback`,
+    {method:'POST', body: JSON.stringify({version:v, by:'web-admin'})});
+  toast(`已回退并发布为 v${r.version}`);
+  await loadDefaults(); await loadVersions();
+};
+
+async function loadDevices() {
+  const rows = await api('/api/admin/devices');
+  $('#devices-table tbody').innerHTML = rows.map(r => `
+    <tr><td class="mono">${esc(r.device_id)}</td>
+      <td>${esc(r.user_id)}</td><td>${esc(r.group_id)}</td>
+      <td>v${r.profile_base}</td><td>v${r.session_base}</td>
+      <td class="mono muted">${esc(r.fingerprint)}</td>
+      <td>${r.known_schema}</td>
+      <td>${r.corrupt_count ? `<span class="pill lww-server">${r.corrupt_count}</span>` : 0}</td>
+      <td class="muted">${new Date(r.seen_at).toLocaleString()}</td></tr>`).join('');
+}
+
+const valCell = v => `<pre>${esc(typeof v==='object'?JSON.stringify(v):v)}</pre>`;
+async function loadConflicts() {
+  const rows = await api('/api/admin/conflicts');
+  $('#conflicts-table tbody').innerHTML = rows.map(r => `
+    <tr>
+      <td class="muted mono">${new Date(r.ts).toLocaleString()}</td>
+      <td>${esc(r.user_id)}<br><span class="muted mono">${esc(r.device_id)}</span></td>
+      <td class="mono">${esc(r.path)}</td>
+      <td>${valCell(r.base_json)}</td>
+      <td>${valCell(r.client_json)}</td>
+      <td>${valCell(r.server_json)}</td>
+      <td><span class="pill ${esc(r.resolution)}">${esc(r.resolution)}</span></td>
+      <td class="mono">${esc(r.winner)}</td>
+      <td>${valCell(r.resolved_json)}</td>
+      <td>v${r.profile_version}</td>
+    </tr>`).join('');
+}
+
+async function loadDiagnostics() {
+  const rows = await api('/api/admin/diagnostics');
+  $('#diag-table tbody').innerHTML = rows.map(r => `
+    <tr><td class="muted mono">${new Date(r.ts).toLocaleString()}</td>
+      <td class="mono">${esc(r.device_id)}</td>
+      <td>${esc(r.user_id)}</td>
+      <td><span class="pill overwrite">${esc(r.kind)}</span></td>
+      <td><pre>${esc(JSON.stringify(r.payload_json, null, 2))}</pre></td></tr>`).join('');
+}
+
+function refresh() {
+  const tab = document.querySelector('#tabs button.active').dataset.tab;
+  if (tab === 'defaults') loadDefaults();
+  if (tab === 'versions') loadVersions();
+  if (tab === 'devices') loadDevices();
+  if (tab === 'conflicts') loadConflicts();
+  if (tab === 'diagnostics') loadDiagnostics();
+}
+loadDefaults();
+setInterval(refresh, 5000);
+</script>
+</body>
+</html>
